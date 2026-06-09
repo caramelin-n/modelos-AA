@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Demo 2: MoveNet - ¡Alternativa en TFJS!</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection"></script>
+    <style>
+        body { font-family: sans-serif; text-align: center; background: #e6f7ff; transition: background 0.3s; }
+        #canvas { position: absolute; left: 50%; transform: translateX(-50%); border-radius: 10px; }
+        #video { transform: scaleX(-1); display: none; }
+        #movimiento-status { 
+            font-size: 22px; 
+            font-weight: bold; 
+            color: #0050b3; 
+            background: white; 
+            display: inline-block; 
+            padding: 10px 20px; 
+            border-radius: 20px; 
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            margin-bottom: 15px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Modelo Alternativo: MoveNet</h1>
+    <p id="status">Cargando modelo MoveNet...</p>
+    
+    <div id="movimiento-status">Estado: Reposo</div>
+    <br>
+
+    <video id="video" width="640" height="480" autoplay playsinline></video>
+    <canvas id="canvas" width="640" height="480"></canvas>
+
+    <script>
+        let detector;
+        let video = document.getElementById('video');
+        let canvas = document.getElementById('canvas');
+        let ctx = canvas.getContext('2d');
+        const statusEl = document.getElementById('status');
+        const movimientoEl = document.getElementById('movimiento-status');
+
+        async function setupCamera() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                video.srcObject = stream;
+                return new Promise((resolve) => { video.onloadedmetadata = () => resolve(video); });
+            } catch (e) {
+                throw new Error('No se pudo acceder a la cámara: ' + e.message);
+            }
+        }
+
+        async function main() {
+            try {
+                statusEl.innerText = "Cargando TensorFlow.js...";
+                
+                // ==========================================
+                // 🛠️ CONFIGURACIÓN DE MOVENET
+                // ==========================================
+                statusEl.innerText = "Inicializando MoveNet (Lightning)...";
+                const model = poseDetection.SupportedModels.MoveNet;
+                const detectorConfig = { 
+                    modelType: poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING 
+                };
+                detector = await poseDetection.createDetector(model, detectorConfig);
+                
+                statusEl.innerText = "Abriendo cámara...";
+                await setupCamera();
+                
+                statusEl.innerText = "¡MoveNet Activo! (17 Puntos)";
+                video.play();
+                detectPose();
+            } catch (error) {
+                console.error(error);
+                statusEl.innerText = 'Error: ' + error.message;
+                statusEl.style.color = 'red';
+            }
+        }
+
+        async function detectPose() {
+            try {
+                const poses = await detector.estimatePoses(video);
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                
+                ctx.save();
+                ctx.translate(canvas.width, 0);
+                ctx.scale(-1, 1);
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                ctx.restore();
+
+                let movimientoDetectado = false;
+
+                if (poses.length > 0) {
+                    const keypoints = poses[0].keypoints;
+
+                    // Dibujar los 17 puntos de MoveNet
+                    keypoints.forEach(kp => {
+                        if (kp.score > 0.5) {
+                            ctx.beginPath();
+                            ctx.arc(canvas.width - kp.x, kp.y, 6, 0, 2 * Math.PI);
+                            ctx.fillStyle = '#00a8ff'; // Azul eléctrico para diferenciarlo de BlazePose
+                            ctx.fill();
+                        }
+                    });
+
+                    // Misma lógica de detección: Muñecas vs Orejas
+                    const manoDer = keypoints.find(kp => kp.name === 'right_wrist');
+                    const manoIzq = keypoints.find(kp => kp.name === 'left_wrist');
+                    const orejaDer = keypoints.find(kp => kp.name === 'right_ear');
+                    const orejaIzq = keypoints.find(kp => kp.name === 'left_ear');
+
+                    if (manoDer && orejaDer && manoDer.score > 0.5 && orejaDer.score > 0.5) {
+                        if (manoDer.y < orejaDer.y) movimientoDetectado = true;
+                    }
+                    if (manoIzq && orejaIzq && manoIzq.score > 0.5 && orejaIzq.score > 0.5) {
+                        if (manoIzq.y < orejaIzq.y) movimientoDetectado = true;
+                    }
+                }
+
+                if (movimientoDetectado) {
+                    movimientoEl.innerText = "¡MOVIMIENTO DETECTADO!";
+                    movimientoEl.style.background = "#bae7ff"; 
+                    document.body.style.background = "#e6f7ff"; 
+                } else {
+                    movimientoEl.innerText = "Estado: Reposo";
+                    movimientoEl.style.background = "white";
+                    document.body.style.background = "#f0f2f5";
+                }
+
+                requestAnimationFrame(detectPose);
+            } catch (error) {
+                console.error('Error en detectPose:', error);
+            }
+        }
+
+        setTimeout(main, 2000);
+    </script>
+</body>
+</html>

@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Demo BlazePose - ¡Fighting!</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection"></script>
+    <style>
+        body { font-family: sans-serif; text-align: center; background: #fff0f5; transition: background 0.3s; }
+        #canvas { position: absolute; left: 50%; transform: translateX(-50%); }
+        #video { transform: scaleX(-1); display: none; }
+        /* Estilo lindo para el detector de movimiento */
+        #movimiento-status { 
+            font-size: 22px; 
+            font-weight: bold; 
+            color: #d63384; 
+            background: white; 
+            display: inline-block; 
+            padding: 10px 20px; 
+            border-radius: 20px; 
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            margin-bottom: 15px;
+        }
+    </style>
+</head>
+<body>
+    <h1>BlazePose Demo</h1>
+    <p id="status">Cargando modelo...</p>
+    
+    <div id="movimiento-status">Estado: Reposo</div>
+    <br>
+
+    <video id="video" width="640" height="480" autoplay playsinline></video>
+    <canvas id="canvas" width="640" height="480"></canvas>
+
+    <script>
+        let detector;
+        let video = document.getElementById('video');
+        let canvas = document.getElementById('canvas');
+        let ctx = canvas.getContext('2d');
+        const statusEl = document.getElementById('status');
+        const movimientoEl = document.getElementById('movimiento-status'); // Vinculamos el elemento de texto
+
+        async function setupCamera() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                video.srcObject = stream;
+                return new Promise((resolve) => { video.onloadedmetadata = () => resolve(video); });
+            } catch (e) {
+                throw new Error('No se pudo acceder a la cámara: ' + e.message);
+            }
+        }
+
+        async function main() {
+            try {
+                statusEl.innerText = "Cargando modelo...";
+                
+                if (!window.tf) throw new Error('TensorFlow.js no cargó');
+                if (!window.poseDetection) throw new Error('Pose Detection no cargó');
+                
+                statusEl.innerText = "Inicializando modelo BlazePose...";
+                const model = poseDetection.SupportedModels.BlazePose;
+                const detectorConfig = { runtime: 'tfjs', modelType: 'lite' };
+                detector = await poseDetection.createDetector(model, detectorConfig);
+                
+                statusEl.innerText = "Solicitando acceso a cámara...";
+                await setupCamera();
+                
+                statusEl.innerText = "¡Modelo listo!";
+                video.play();
+                detectPose();
+            } catch (error) {
+                console.error('Error:', error);
+                statusEl.innerText = 'Error: ' + error.message;
+                statusEl.style.color = 'red';
+            }
+        }
+
+        async function detectPose() {
+            try {
+                const poses = await detector.estimatePoses(video);
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                
+                ctx.save();
+                ctx.translate(canvas.width, 0);
+                ctx.scale(-1, 1);
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                ctx.restore();
+
+                let movimientoDetectado = false; // Variable bandera para saber si hay movimiento
+
+                if (poses.length > 0) {
+                    const keypoints = poses[0].keypoints;
+
+                    // Dibujar los puntitos rosa tradicionales de tu código
+                    keypoints.forEach(kp => {
+                        if (kp.score > 0.5) {
+                            ctx.beginPath();
+                            ctx.arc(canvas.width - kp.x, kp.y, 5, 0, 2 * Math.PI);
+                            ctx.fillStyle = '#ff69b4';
+                            ctx.fill();
+                        }
+                    });
+
+                    // ==========================================
+                    // ✨ SECCIÓN DETECTOR DE MOVIMIENTO ✨
+                    // ==========================================
+                    // Buscamos las muñecas y las orejas en el arreglo de puntos
+                    const manoDer = keypoints.find(kp => kp.name === 'right_wrist');
+                    const manoIzq = keypoints.find(kp => kp.name === 'left_wrist');
+                    const orejaDer = keypoints.find(kp => kp.name === 'right_ear');
+                    const orejaIzq = keypoints.find(kp => kp.name === 'left_ear');
+
+                    // Validamos que los puntos existan y tengan buena precisión (> 0.5)
+                    if (manoDer && orejaDer && manoDer.score > 0.5 && orejaDer.score > 0.5) {
+                        // En la web, menor 'y' significa estar más ARRIBA en la pantalla
+                        if (manoDer.y < orejaDer.y) {
+                            movimientoDetectado = true;
+                        }
+                    }
+
+                    if (manoIzq && orejaIzq && manoIzq.score > 0.5 && orejaIzq.score > 0.5) {
+                        if (manoIzq.y < orejaIzq.y) {
+                            movimientoDetectado = true;
+                        }
+                    }
+                }
+
+                // Actualizamos la interfaz según lo que pasó en el cuadro actual
+                if (movimientoDetectado) {
+                    movimientoEl.innerText = "¡MOVIMIENTO DETECTADO!";
+                    movimientoEl.style.background = "#ffb6c1"; // Cambia la cajita a rosa pastel
+                    document.body.style.background = "#ffe4e1"; // Fondo más cálido
+                } else {
+                    movimientoEl.innerText = "Estado: Reposo";
+                    movimientoEl.style.background = "white";
+                    document.body.style.background = "#fff0f5";
+                }
+
+                requestAnimationFrame(detectPose);
+            } catch (error) {
+                console.error('Error en detectPose:', error);
+            }
+        }
+
+        setTimeout(main, 2000);
+    </script>
+</body>
+</html>
